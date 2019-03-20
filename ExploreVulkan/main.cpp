@@ -16,6 +16,17 @@
 int WIDTH = 800;
 int HEIGHT = 600;
 
+//basic range of diagonstic layers
+const std::vector<const char*> validationLayers = {
+	"VK_LAYER_LUNARG_standard_validation"
+};
+
+#ifdef NDEBUG
+	const bool enableValidationLayers = false;
+#else 
+const bool enableValidationLayers = true;
+#endif
+
 class HelloTriangleApplication {
 public:
 	void run() {
@@ -78,6 +89,17 @@ private:
 			std::cerr << "Missing at least one extension"; 
 		}
 
+		//Checking Validation Layers
+		uint32_t layerCount = 0;
+		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+
+		std::vector<VkLayerProperties> availableLayers(layerCount);
+		vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+		if (enableValidationLayers && !checkValidationLayers(availableLayers, validationLayers))
+		{
+			throw std::runtime_error("validation layers requested but not available");
+		}
 
 		if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS)
 		{
@@ -116,7 +138,8 @@ private:
 				if (glfwExtensionName == extension.extensionName) {
 					std::cout << "as required glfw extension ";
 					std::cout << "found";
-					extensionsFound ++; 
+					extensionsFound ++;
+					break;
 				}
 			}
 			
@@ -127,7 +150,31 @@ private:
 			return 1;
 	}
 
+	bool checkValidationLayers(std::vector<VkLayerProperties> availableLayers,const std::vector<const char*> validationLayers)
+	{
+		for (const char* layerName : validationLayers)
+		{
+			bool layerFound = false;
+			for (const auto& layer : availableLayers)
+			{
+				if (strcmp(layer.layerName, layerName) == 0)
+				{
+					layerFound = true;
+					break;
+				}
+			}
+			if (!layerFound)
+				return false;
+		}
+		return true;
+		
+	}
+
 };
+
+	
+
+
 
 
 int main() {
