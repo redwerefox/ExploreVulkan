@@ -65,14 +65,11 @@ private:
 		createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		createInfo.pApplicationInfo = &appInfo;
 
-		uint32_t glfwExtensionCount = 0;
-		const char ** glfwExtentions;
+		
+		std::vector<const char*> glfwExtentions = getRequiredExtensions();
 
-
-		glfwExtentions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
-		createInfo.ppEnabledExtensionNames = glfwExtentions;
-		createInfo.enabledExtensionCount = glfwExtensionCount;
+		createInfo.ppEnabledExtensionNames = glfwExtentions.data();
+		createInfo.enabledExtensionCount = static_cast<uint32_t>(glfwExtentions.size());
 
 		createInfo.enabledLayerCount = 0;
 
@@ -84,7 +81,7 @@ private:
 
 		std::cout << "available extensions:" << std::endl;
 
-		if (checkExtensions(glfwExtentions, glfwExtensionCount, extensions) != VK_SUCCESS)
+		if (checkExtensions(glfwExtentions, extensions) != VK_SUCCESS)
 		{
 			std::cerr << "Missing at least one extension"; 
 		}
@@ -123,17 +120,29 @@ private:
 		glfwTerminate();
 	}
 
+
+	std::vector <const char*> getRequiredExtensions()
+	{
+		uint32_t glfwExtensionCount = 0;
+		const char ** glfwExtensions;
+
+		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+		std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+
+		if (enableValidationLayers) {
+			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+		}
+		return extensions;
+	}
+
 	//Challenge 1#
-	int checkExtensions (const char** glfwExtensions, int glfwExtensionCount, std::vector<VkExtensionProperties> vkExtensions){
-
-		std::vector<std::string> v(glfwExtensions, glfwExtensions + glfwExtensionCount);
+	int checkExtensions (std::vector<const char*> glfwExtensions, std::vector<VkExtensionProperties> vkExtensions){
 		int32_t extensionsFound = 0;
-
 		for (const auto& extension : vkExtensions)
 		{
 			std::cout << "\n" << extension.extensionName << " ";
 
-			for (const std::string& glfwExtensionName : v)
+			for (const std::string& glfwExtensionName : glfwExtensions)
 			{
 				if (glfwExtensionName == extension.extensionName) {
 					std::cout << "as required glfw extension ";
@@ -144,7 +153,7 @@ private:
 			}
 			
 		}
-		if (extensionsFound == glfwExtensionCount)
+		if (extensionsFound == static_cast<int32_t>(glfwExtensions.size()))
 			return VK_SUCCESS;
 		else
 			return 1;
