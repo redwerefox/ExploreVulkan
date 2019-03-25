@@ -23,5 +23,8 @@
     <ClInclude Include="QuereFamilyIndices.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="SwapChainDetails.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

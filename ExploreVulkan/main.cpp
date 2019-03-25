@@ -15,6 +15,7 @@
 #include <set>
 
 #include "QuereFamilyIndices.h"
+#include "SwapChainDetails.h"
 
 int WIDTH = 800;
 int HEIGHT = 600;
@@ -22,6 +23,10 @@ int HEIGHT = 600;
 //basic range of diagonstic layers
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_LUNARG_standard_validation"
+};
+
+const std::vector<const char*> deviceExtensions = {
+	VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
 #ifdef NDEBUG
@@ -73,6 +78,8 @@ private:
 	VkQueue graphicsQueue;
 	VkQueue presentQueue;
 
+	VkSwapchainKHR swapChain;
+
 	void initWindow() {
 		glfwInit();
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -96,6 +103,8 @@ private:
 		}
 	}
 	void cleanup() {
+
+		vkDestroySwapchainKHR(device, swapChain, nullptr);
 
 		vkDestroyDevice(device,nullptr);
 
@@ -227,48 +236,41 @@ private:
 
 	bool isDeviceSuitable(VkPhysicalDevice device)
 	{
-		QueueFamilyIndices indicies = findQuereFamilies(device);
-		return indicies.isComplete();
+		QueueFamilyIndices indicies = findQuereFamilies(device, surface);
+
+		bool deviceExtensionsSupported = CheckDeviceExtensionsSupported(device);
+
+		SwapChainSupportDetails swapchainDetails = querySwapChainSupport(device, surface);
+
+		return indicies.isComplete() && deviceExtensionsSupported && swapChainAdequate(swapchainDetails);
 	}
 
-	QueueFamilyIndices findQuereFamilies(VkPhysicalDevice physicalDevice)
+	bool CheckDeviceExtensionsSupported(VkPhysicalDevice device)
 	{
-		QueueFamilyIndices indices;
+		uint32_t deviceExtensionCount;
+		vkEnumerateDeviceExtensionProperties(device, nullptr, &deviceExtensionCount, nullptr);
 
-		uint32_t quereFamilyCount = 0;
-		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &quereFamilyCount, nullptr);
+		std::vector<VkExtensionProperties> extensionProperties (deviceExtensionCount);
+		vkEnumerateDeviceExtensionProperties(device, nullptr, &deviceExtensionCount, extensionProperties.data());
 
-		std::vector<VkQueueFamilyProperties> quereFamilies (quereFamilyCount);
-		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &quereFamilyCount, quereFamilies.data());
-
-		int i = 0;
-		for (const auto& quereFamily : quereFamilies) {
-
-			VkBool32 presentSupport = false;
-			vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, surface, &presentSupport);
-
-			if (quereFamily.queueCount > 0 && quereFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-				indices.graphicsFamily = i;
+		for (const auto& extension : deviceExtensions)
+		{
+			bool extensionFound = false;
+			for (const auto& availableExtension : extensionProperties)
+			{
+				if (availableExtension.extensionName == extension)
+					extensionFound = true;
+					break;
 			}
-
-			if (quereFamily.queueCount > 0 && presentSupport)
-				indices.presentFamily = i;
-
-			//This approach allows to pick two seperate queues for graphics and presentation
-			//Note its less performant to do so
-
-			if (indices.isComplete())
-				break;
-			i++;
 		}
-
-		return indices;
+		return true;
 	}
+
 
 	void createLogicalDevice()
 	{
 
-		QueueFamilyIndices indices = findQuereFamilies(physicalDevice);
+		QueueFamilyIndices indices = findQuereFamilies(physicalDevice, surface);
 
 		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
 		std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily.value(), indices.presentFamily.value() };
@@ -291,6 +293,8 @@ private:
 		createInfo.pQueueCreateInfos = queueCreateInfos.data();
 		createInfo.queueCreateInfoCount = uniqueQueueFamilies.size();
 		createInfo.pEnabledFeatures = &deviceFeatures;
+		createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
 		if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
 			throw std::runtime_error("failed to create logical device");
@@ -302,6 +306,58 @@ private:
 	void createSurface() {
 		if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS)
 			throw std::runtime_error("failed to create window surface");
+	}
+
+
+	void createSwapChain()
+	{
+		SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice, surface);
+		
+		VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
+		VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
+		VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities, WIDTH, HEIGHT);
+
+		uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+
+		if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
+			imageCount = swapChainSupport.capabilities.maxImageCount;
+		}
+
+		VkSwapchainCreateInfoKHR createInfo = {};
+		createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+		createInfo.surface = surface;
+
+		//createInfo.imageExtent = extent;
+		createInfo.imageFormat = surfaceFormat.format;
+		createInfo.imageColorSpace = surfaceFormat.colorSpace;
+		createInfo.presentMode = presentMode;
+		createInfo.clipped = VK_TRUE;
+		createInfo.imageArrayLayers = 1;
+		createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+		
+
+		QueueFamilyIndices indices = findQuereFamilies(physicalDevice, surface);
+		uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+
+		if (indices.graphicsFamily != indices.presentFamily) {
+			createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+			createInfo.queueFamilyIndexCount = 2;
+			createInfo.pQueueFamilyIndices = queueFamilyIndices;
+		}
+		else {
+			createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+			createInfo.queueFamilyIndexCount = 0; // Optional
+			createInfo.pQueueFamilyIndices = nullptr; // Optional
+		}
+		createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
+		createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+		createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+		if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) == VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create swap chain");
+		};
+
 	}
 
 	//Challenge 1
