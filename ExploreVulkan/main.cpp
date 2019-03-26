@@ -79,6 +79,11 @@ private:
 	VkQueue presentQueue;
 
 	VkSwapchainKHR swapChain;
+	std::vector<VkImage> swapChainImages;
+	VkExtent2D swapExtent;
+	VkFormat swapFormat;
+
+	std::vector<VkImageView> swapChainImageViews;
 
 	void initWindow() {
 		glfwInit();
@@ -94,7 +99,9 @@ private:
 		createSurface();
 		pickPhysicalDevice();
 		createLogicalDevice();
-
+		createSwapChain();
+		createImageViews();
+		createGraphicsPipeline();
 	}
 	void mainLoop(){
 		while (!glfwWindowShouldClose(window))
@@ -103,6 +110,11 @@ private:
 		}
 	}
 	void cleanup() {
+
+		for (auto& imageView : swapChainImageViews)
+		{
+			vkDestroyImageView(device, imageView, nullptr);
+		}
 
 		vkDestroySwapchainKHR(device, swapChain, nullptr);
 
@@ -130,6 +142,7 @@ private:
 
 		if (enableValidationLayers) {
 			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+			extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
 		}
 		return extensions;
 	}
@@ -181,6 +194,9 @@ private:
 			throw std::runtime_error("validation layers requested but not available");
 		}
 
+		createInfo.enabledLayerCount = validationLayers.size();
+		createInfo.ppEnabledLayerNames = validationLayers.data();
+
 		if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to initialize vulkan instance");
@@ -197,7 +213,7 @@ private:
 		VkDebugUtilsMessengerCreateInfoEXT createInfo = {};
 		createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
 		createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
-			| VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT ;
+			| VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
 		createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
 			| VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
 		createInfo.pfnUserCallback = debugCallback;
@@ -253,17 +269,28 @@ private:
 		std::vector<VkExtensionProperties> extensionProperties (deviceExtensionCount);
 		vkEnumerateDeviceExtensionProperties(device, nullptr, &deviceExtensionCount, extensionProperties.data());
 
+		bool extensionFound = false;
 		for (const auto& extension : deviceExtensions)
 		{
-			bool extensionFound = false;
+			
 			for (const auto& availableExtension : extensionProperties)
 			{
-				if (availableExtension.extensionName == extension)
+				
+				if ( std::strcmp( availableExtension.extensionName, extension ) == 0)
+				{
 					extensionFound = true;
+					std::cout << std::endl << "Nessesary Device Extension : " << availableExtension.extensionName;
+					std::cout << " found";
 					break;
+				}
+					
 			}
 		}
-		return true;
+		std::cout << std::endl;
+		if (extensionFound)
+			std::cout  << "All device extensions found" << std::endl;
+		
+		return extensionFound;
 	}
 
 
@@ -327,7 +354,8 @@ private:
 		createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
 		createInfo.surface = surface;
 
-		//createInfo.imageExtent = extent;
+		createInfo.minImageCount = imageCount;
+		createInfo.imageExtent = extent;
 		createInfo.imageFormat = surfaceFormat.format;
 		createInfo.imageColorSpace = surfaceFormat.colorSpace;
 		createInfo.presentMode = presentMode;
@@ -346,17 +374,60 @@ private:
 		}
 		else {
 			createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-			createInfo.queueFamilyIndexCount = 0; // Optional
-			createInfo.pQueueFamilyIndices = nullptr; // Optional
+			//createInfo.queueFamilyIndexCount = 0; // Optional
+			//createInfo.pQueueFamilyIndices = nullptr; // Optional
 		}
 		createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
 		createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 		createInfo.oldSwapchain = VK_NULL_HANDLE;
 
-		if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) == VK_SUCCESS)
+		if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create swap chain");
-		};
+		}
+
+		uint32_t imagesCount;
+		vkGetSwapchainImagesKHR(device, swapChain, &imagesCount, nullptr);
+
+		swapChainImages.resize(imagesCount);
+		vkGetSwapchainImagesKHR(device, swapChain, &imagesCount, swapChainImages.data());
+
+		swapFormat = surfaceFormat.format;
+		swapExtent = extent;
+
+	}
+
+	void createImageViews() {
+		swapChainImageViews.resize(swapChainImages.size());
+
+		for (size_t i = 0; i < swapChainImages.size(); i++)
+		{
+			VkImageViewCreateInfo createInfo = {};
+			createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+			createInfo.image = swapChainImages[i];
+
+			createInfo.format = swapFormat;
+			createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+
+			createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			createInfo.subresourceRange.baseMipLevel = 0;
+			createInfo.subresourceRange.levelCount = 1;
+			createInfo.subresourceRange.baseArrayLayer = 0;
+			createInfo.subresourceRange.layerCount = 1;
+
+			if (vkCreateImageView(device, &createInfo, nullptr, &swapChainImageViews[i]) != VK_SUCCESS) {
+				throw std::runtime_error("failed to create image views!");
+			}
+		}
+	}
+
+	//Graphics Pipeline
+	void createGraphicsPipeline()
+	{
 
 	}
 
@@ -404,8 +475,6 @@ private:
 		
 	}
 
-	
-
 	//CALLBACKS
 
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -414,8 +483,8 @@ private:
 		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
 		void* pUserData) {
 
-		std::cerr << "! validation layer:" << pCallbackData->pMessage << std::endl;
-
+		if( messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+			std::cerr << "! validation layer:" << pCallbackData->pMessage << std::endl;
 		return VK_FALSE;
 	}
 
